@@ -3,10 +3,14 @@ DESCRIPTION
 Lightweight bash script that notify new e-mail from multiple maildir (only e-mails in MAILDIR format) on desktop GUI with notify, on shell, on remote with jabber instant messaging or show on conky  system monitor ( http://conky.sourceforge.net/ )
 
 INSTALL
+Need to python-xmpp, and perl.
 
 First open maildir-notification file and put your maildirs path on MAILDIRS array.
+
 Second make a dir where script will write files and put the path on TMPPATH.
+
 Check that /usr/share/icons/gnome/48x48/actions/mail_new.png exist, with no install gnome-icon* package.
+
 Correct XMPPNOTIFY and MIMEDECODER with full path of the script like:
 
 XMPPNOTIFY='python /home/user/scripts/xmpp-notify.py'
