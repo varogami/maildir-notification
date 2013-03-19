@@ -1,0 +1,399 @@
+#!/bin/bash
+#Copyleft 2013  varogami <varogami@autistici.org>
+
+#This program is free software: you can redistribute it and/or modify
+#it under the terms of the GNU General Public License as published by
+#the Free Software Foundation, either version 3 of the License, or
+#(at your option) any later version.
+
+#This program is distributed in the hope that it will be useful,
+#but WITHOUT ANY WARRANTY; without even the implied warranty of
+#MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#GNU General Public License for more details.
+
+#You should have received a copy of the GNU General Public License
+#along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+MAILDIRS=(
+'/yourdir/one'
+'/yourdir/two'
+'/yourdir/three'
+)
+
+LIMIT_SUB=60 #max lenght of subject in xmpp
+LIMIT_SUB_NOT=120 #max lenght of subject in notification
+LIMIT_FROM=30 #mac lenght of from
+LIMIT_MAILS=40 #max number of mail showing in summary
+TIMEOUT_NOTIFY=50000 #libnotify timeout in ms
+TIME=900 #time of every loop in second
+
+TMPPATH='/your-prefer-dir/' #dir where saving data
+REGISTER=$TMPPATH/notified
+icon="/usr/share/icons/gnome/48x48/actions/mail_new.png"
+XMPPNOTIFY='python xmpp-notify.py' #change with full path of xmpp script
+MIMEDECODER='mimedecode.pl' #change with full path of xmpp script
+
+LIBNOTIFY() {
+	libicon=$1
+	output=$2
+	output2=$3
+	if notify-send -i $libicon "$output" "$output2" -t $TIMEOUT_NOTIFY &> $TMPPATH/notify-output
+	then
+		rm $TMPPATH/notify-output
+	else
+		notify-send "check_new_mail message error" "`cat $TMPPATH/notify-output`"
+		rm $TMPPATH/notify-output
+	fi	
+}
+
+#count new mail and update summary head
+NEWMAILCOUNT() {
+	#to summary
+	echo > $TMPPATH/33333
+	for i in ${MAILDIRS[@]}
+	do
+		NUMB=`find $i/new -type f | wc -l`
+		(( TOT+=NUMB ))
+
+		#to summary
+		if [ ! $NUMB -eq 0 ]
+		then
+			echo "`basename $i` ($NUMB)" >> $TMPPATH/33333
+		fi
+		
+	done
+	echo "$TOT" 
+	#to summary
+	echo "$TOT" > $TMPPATH/total
+}
+
+RESET() {
+	echo > $REGISTER
+	echo > $TMPPATH/22222
+	echo > $TMPPATH/33333 
+	}
+
+#with no args update summary and count
+NOTIFY() {	
+	TOT=0
+	echo > $TMPPATH/33333
+	for i in ${MAILDIRS[@]}
+	do
+		NUMB=`find $i/new -type f | wc -l`
+		(( TOT+=NUMB ))
+		if [ ! $NUMB -eq 0 ]
+		then
+			##to summary
+			echo "`basename $i` ($NUMB)" >> $TMPPATH/33333
+						
+			for NM in $i/new/*
+			do
+				if grep -q "$NM" $REGISTER
+				then
+					echo "debug: checked" > /dev/null
+				else
+				        #####################################   
+					##extract and decode from and subject
+					echo "$NM" >> $REGISTER		
+					
+					FROM="`cat $NM | grep '^From:' | head -n1 | sed 's/^From: //;s/>//' | cut -d'<' -f2`"
+					#if from is on multiline
+					if ! echo $FROM | grep "@" > /dev/null
+					then
+					    
+					    FROMLINE="`cat $NM | grep -n '^From:' | head -n1 | cut -d: -f 1`"					    
+					    (( FROMLINE = FROMLINE + 1 ))					    
+					    while ! echo $FROM | grep "@" > /dev/null
+					    do
+						FROM="`cat $NM | sed -n "$FROMLINE p"`"
+					    done
+					    FROM="`echo $FROM | head -n1 | sed 's/>//' | cut -d'<' -f2`"
+					fi
+
+					#cut long from - print only domain mail if mail differnt to hotmail, gmail etc else only username
+					if [ `echo $FROM | wc -c` -gt $LIMIT_FROM ]
+					then
+					    if echo $FROM | grep -iE "hotmail|gmail.com" > /dev/null 
+					    then 
+						FROM="`echo $FROM | cut -d @ -f1`"
+					    else
+						FROM="`echo $FROM | cut -d @ -f2`"
+					    fi
+					fi
+					
+					#some mail have parentesis - maybe an error to the way extract fromc
+					FROM="`echo $FROM | sed 's/(.*)//'`"		
+
+                                        #number of subject position, needed for find subject in multiline
+					SUBJECTLINE="`cat $NM | grep -n '^Subject:' | head -n1 | cut -d: -f 1`"
+					TOTLINENM=`cat $NM | wc -l`
+					(( SUBJECTLINE = SUBJECTLINE + 1 ))
+
+					## find subject in next line
+					SUBJECT="`cat $NM | grep '^Subject:' | head -n1 `"
+					SUBJECT2="`cat $NM | sed -n "$SUBJECTLINE p"`"
+					
+					#not much clean method but work
+					while [[ $SUBJECT2 != *X-BeenThere:* ]] && \
+					    [[ $SUBJECT2 != From:* ]] && \
+					    [[ $SUBJECT2 != Content-Type:* ]] && \
+					    [[ $SUBJECT2 != Message-ID:* ]] && \
+					    [[ $SUBJECT2 != MIME-Version:* ]] && \
+					    [[ $SUBJECT2 != Mime-Version:* ]] && \
+					    [[ $SUBJECT2 != X-PHP-Originating-Script:* ]] && \
+					    [[ $SUBJECT2 != Date:* ]] && \
+					    [[ $SUBJECT2 != X-SA-Exim-Version:* ]] && \
+					    [[ $SUBJECT2 != References:* ]] && \
+					    [[ $SUBJECT2 != In-Reply-To:* ]] && \
+					    [[ $SUBJECT2 != To:* ]] && \
+					    [[ $SUBJECT2 != Message-Id:* ]] && \
+					    [[ $SUBJECT2 != Organization:* ]] && \
+					    [[ $SUBJECT2 != X-Virus-Scanned:* ]] && \
+					    [[ $SUBJECT2 != X-Envelope-From:* ]] && \
+					    [[ $SUBJECT2 != Reply-To:* ]]
+					do
+					    
+					    SUBJECT=$SUBJECT$SUBJECT2
+					    
+					    (( SUBJECTLINE = SUBJECTLINE + 1 ))
+					    SUBJECT2="`cat $NM | sed -n "$SUBJECTLINE p"`"
+					    
+					    #check if SUBJECTLINE is last line
+					    if [ $SUBJECTLINE -gt $TOTLINENM ]
+					    then
+						SUBJECT2="X-BeenThere:"
+					    fi
+					done
+					
+					## find subject decoding and decode it
+					if echo $SUBJECT | grep -iE "\=\?utf-8\?|\=\?iso-8859-1\?|\=\?iso-8859-15\?|\=\?Windows-1252\?" | grep '^Subject:' > /dev/null
+					then
+					    
+				       	    SUBJECT=`$MIMEDECODER "$SUBJECT"`
+					fi
+		    								
+					SUBJECT="`echo $SUBJECT | sed 's/^Subject: //'`"
+				 
+										 
+					#remove square bracket of mailing list
+					CLEANSUBJECT="`echo $SUBJECT | sed 's/\[.*\]//'`"
+			      
+					#cut long subject to xmpp
+					if [ `echo $CLEANSUBJECT | wc -c` -gt $LIMIT_SUB ]
+					then 
+						SHORTSUBJECT="`echo $CLEANSUBJECT | cut -b1-$LIMIT_SUB`"
+						SHORTSUBJECT=$SHORTSUBJECT'..'
+					else
+						SHORTSUBJECT=$CLEANSUBJECT
+					fi
+					
+					#cut long subject to libnotify
+					if [ `echo $CLEANSUBJECT | wc -c` -gt $LIMIT_SUB_NOT ]
+					then 
+						SHORTSUBJECT2="`echo $CLEANSUBJECT | cut -b1-$LIMIT_SUB`"
+						SHORTSUBJECT2=$SHORTSUBJECT2'..'
+					else
+						SHORTSUBJECT2=$CLEANSUBJECT
+					fi
+
+					##fix problem with pango like xml encoding
+					## by https://trac.openxdata.org/attachment/wiki/EncodingXMLForLiquibase/encode-xml.bash
+					SHORTSUBJECTPANGO=\
+"`echo $SHORTSUBJECT | sed 's/&/&amp;/g;s/>/\&gt;/g;s/</\&lt;/g;s/\"/\&quot;/g;s/\r/\&\#13;/g;:a;N;$!ba;s/\n/\&\#10;/g'`"
+
+					echo "<span foreground=\"#000000\">`date +"%a %d %b %H:%M"`</span>  [`basename $i`] <b><span foreground=\"#000000\"> $FROM </span></b> $SHORTSUBJECTPANGO" >> $TMPPATH/22222		
+					
+					##update in real time total count(to not wait update it after the check)
+					#(( TMPNUM++ ))
+					#AWESOMECOUNT $TMPNUM					
+					
+					####NOTIFICATIONS
+					case $1 in
+					stdout)
+						echo "$FROM || $CLEANSUBJECT"
+						sleep 0.3s
+					;;
+					
+					xmpp)
+						$XMPPNOTIFY "mail: [`basename $i`] $SHORTSUBJECT
+						"
+						sleep 1s
+					;;
+					
+					libnotify)
+						LIBNOTIFY $icon "`basename $i`" "$FROM \n$SHORTSUBJECT2"
+						sleep 2s			
+					;;
+					
+					all)
+						echo "$FROM || $SUBJECT"
+						$XMPPNOTIFY "mail: [`basename $i`] $SHORTSUBJECT
+						"
+						LIBNOTIFY $icon "`basename $i`" "$FROM \n$SHORTSUBJECT2"	
+						sleep 0.3s
+					;;					
+					esac
+					
+				fi
+			done
+		fi	
+	done
+	
+	##to summary
+	echo >> $TMPPATH/33333
+	echo "$TOT" > $TMPPATH/total
+		
+	if [ $TOT -eq 0 ] 
+	then 
+		#not necessary
+		RESET
+	fi
+	echo $TOT
+}
+
+	
+##### body of script ####
+#########################
+
+case $1 in
+
+
+###summary
+summary)
+        #build summary head (maildir name with number of new mail)
+	TOTNUM=`NEWMAILCOUNT`
+	if [ `cat $TMPPATH/total` -eq 0 ]
+	then
+	    LIBNOTIFY $icon "summary" "<br>No Mails"
+	    RESET
+	else
+	    ##remove title of mail in summary that moved from new to cur and clean "notified mail" register
+	    VAR=1
+	    cp $TMPPATH/notified $TMPPATH/tmp-notified
+	    while read line
+	    do
+		if [ ! -e $line ]
+		then
+		    cat $TMPPATH/22222 | sed "$VAR d" > $TMPPATH/tmp
+		    mv $TMPPATH/tmp $TMPPATH/22222
+		    cat $TMPPATH/tmp-notified | sed "$VAR d" > $TMPPATH/tmp2
+		    mv $TMPPATH/tmp2 $TMPPATH/tmp-notified
+		else
+		    (( VAR++ ))
+		fi
+	    done < $TMPPATH/notified
+	    mv $TMPPATH/tmp-notified $TMPPATH/notified
+		
+	    #build all if I updated only head or only body summary
+	    if [ `cat $TMPPATH/total` != `cat  $TMPPATH/22222 | sed '/^$/d' | wc -l` ]
+	    then 
+		NOTIFY
+	    fi
+		
+	    ##cut if have much mails
+	    if [ `cat $TMPPATH/22222 | wc -l` -gt $LIMIT_MAILS ]
+	    then	
+		tac $TMPPATH/22222 | head -n $LIMIT_MAILS > $TMPPATH/tmp-summary
+		(( REST = TOTNUM - LIMIT_MAILS))
+		echo "..." >> $TMPPATH/tmp-summary
+		echo "others $REST mails" >> $TMPPATH/tmp-summary
+
+		cat $TMPPATH/33333 > $TMPPATH/summary
+		echo >> $TMPPATH/summary
+		cat $TMPPATH/tmp-summary >> $TMPPATH/summary
+
+		rm $TMPPATH/tmp-summary
+	    else
+		cat $TMPPATH/33333 > $TMPPATH/summary
+		echo >> $TMPPATH/summary
+		tac $TMPPATH/22222 >> $TMPPATH/summary
+	    fi
+	    
+	    case $2 in
+		std)
+		    while read line
+		    do
+			echo $line | w3m -dump -T text/html
+			echo
+		    done <  $TMPPATH/summary 
+		    ;;
+		*) LIBNOTIFY $icon "summary" "`cat $TMPPATH/summary`" ;;
+	    esac
+fi
+;;
+
+summary-conky)
+	CTOT=0
+	STRING=""
+	for i in ${MAILDIRS[@]}
+	do
+		CNUMB=`find $i/new -type f | wc -l`
+		(( CTOT+=CNUMB ))
+		if [ ! $CNUMB -eq 0 ]
+		then
+		    STRING=$STRING"\${color}`basename $i| cut -b1-50` ($CNUMB) \${color1}| " 
+		fi
+	done
+	echo "\${color1}new mail ($CTOT):"
+	
+	echo "`echo $STRING | sed 's/|$//'` \${color}"
+	
+;;
+
+###notify loop
+loop)
+clear
+echo "CTRL+C to stop"
+while [ 1 ]
+do
+    fetchmail
+    case $2 in
+	xmpp) NOTIFY xmpp;;
+	std) NOTIFY stdout;;
+	*) NOTIFY libnotify;;
+    esac
+    sleep $TIME 
+done
+;;
+
+###one notification
+notify)
+case $2 in
+    all) NOTIFY all;;
+    std) NOTIFY stdout;;
+    xmpp) NOTIFY xmpp;;
+    *) NOTIFY libnotify;;
+esac
+;;
+
+###reset summary and register
+reset)
+	    RESET
+;;
+
+count)
+	NEWMAILCOUNT
+;;
+
+
+*)
+	    echo "use with:"
+	    #cat $0 | grep ^[a-zA-Z][a-zA-Z]*\) | sed 's/)//' | sort -d
+	    echo
+	    echo "
+loop std|xmpp|NULL - loop every TIME minutes (NULL with libnotify)
+notify std|xmpp|NULL - notify only one time (NULL with libnotify)
+summary std|NULL - summary of new mail (NULL with libnotify)
+reset - reset memory of new mail arrived
+count - simple count
+
+summary-conky - print a summary in one line in conky output
+"
+
+
+;;
+
+esac
+
+
+
