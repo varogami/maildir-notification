@@ -18,19 +18,19 @@ If you want change other config (LIMIT_SUB, TIME etc, etc)
 
 HOT TO USE
 
-maildir-notification loop		                    notify every TIME with libnotify
+maildir-notification loop		                   -> notify every TIME with libnotify
 
-maildir-notification loop std		                notify on standard output
+maildir-notification loop std		               -> notify on standard output
 
-maildir-notification loop xmpp		              notify to your jabber account
+maildir-notification loop xmpp		             -> notify to your jabber account
 
-maildir-notification summary		     	  	    	show a summary of new mail with libnotify
+maildir-notification summary		     	  	     -> show a summary of new mail with libnotify
 
-maildir-notification summary std			        	show a summary on standard outpunt
+maildir-notification summary std			         ->	show a summary on standard outpunt
 
-maildir-notification summary-conky 		      		print a summary readable by conky (you must to put "text_buffer_size 512" in cokyrc)
+maildir-notification summary-conky 		      		-> print a summary readable by conky (you must to put "text_buffer_size 512" in cokyrc)
 
-maildir-notification reset				            	clean files and all recorded notification
+maildir-notification reset				            	-> clean files and all recorded notification
 
-maildir-notification count 				            	return total number of new mail (to use with some windows manager like awesome)
+maildir-notification count 				            	-> return total number of new mail (to use with some windows manager like awesome)
 
