@@ -1,3 +1,5 @@
+this readme can be outdated, see my site for updated info
+
 DESCRIPTION
 
 Lightweight bash script that notify new e-mail from multiple maildir (only e-mails in MAILDIR format) on desktop GUI with notify, on shell, on remote with jabber instant messaging or show on conky  system monitor ( http://conky.sourceforge.net/ )
