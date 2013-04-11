@@ -1,4 +1,4 @@
-this readme can be outdated, see my site for updated info
+this readme can be outdated, see http://varogami.altervista.org/doku/maildir-notification for updated info
 
 DESCRIPTION
 
