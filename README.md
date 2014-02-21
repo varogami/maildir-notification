@@ -1,19 +1,18 @@
-DESCRIPTION
+## DESCRIPTION
 
 Lightweight bash script that notify new mail from multiple maildir on desktop GUI with notify, on shell, on remote with jabber instant messaging or show on conky  system monitor ( http://conky.sourceforge.net/ )
 
-INSTALL
+## INSTALL
 
-Clone git, copy whole maildir-notification directory on your favorite place.
+1. Clone git
+2. copy whole maildir-notification directory on your favorite place
+3. Open maildir-notification file and set your maildirs paths on MAILDIRS array 
+4. set BASEDIR path with your "favorite place"
+5. Launch "maildir-notification reset"
+6. Put username and password and user to destination of jabber notification in "script/xmpp-notify.py" file (you need two accounts).
+7. If you want change other config (LIMIT_SUB, TIME etc, etc)
 
-Open maildir-notification file and set your maildirs paths on MAILDIRS array and BASEDIR path with your "favorite place".
-Launch "maildir-notification reset"
-
-Put username and password and user to destination of jabber notification in "script/xmpp-notify.py" file (you need two accounts).
-
-If you want change other config (LIMIT_SUB, TIME etc, etc)
-
-HOT TO USE
+## HOT TO USE
 
 maildir-notification loop		notify every TIME with libnotify
 
