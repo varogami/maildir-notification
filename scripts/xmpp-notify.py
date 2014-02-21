@@ -30,7 +30,10 @@ if not cl.connect((JABBER_SERVER,5222)):
 if not cl.auth(jid.getNode(),JABBER_PASS):
     raise IOError('Can not auth with server.')
 
-cl.send( xmpp.Message( TO_JABBER_ID , MSG ) )
+cl.sendInitPresence()
+
+message = xmpp.Message( TO_JABBER_ID , MSG )
+message.setAttr('type', 'chat')
+cl.send( message )
+
 cl.disconnect()
-
-
