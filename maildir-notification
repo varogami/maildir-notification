@@ -7,13 +7,23 @@ MAILDIRS=(
 '/path/maildir/three'
 )
          
-BASEDIR="/dir/where/are/all/files"
-TIME=600 #timeout for loop check in seconds
+
+
+
+
+
+
+
+
+VERBOSE=2 #0-4
+TIME=10 #timeout for loop check in minutes
 TIMEOUT_NOTIFY=50000 #notify timeout in ms
 LIMIT_SUB=60 #number of SUBJCETS's character in xmpp notification
 LIMIT_SUB_NOT=120 #number of SUBJECTs characters in notification
 LIMIT_FROM=30 #number of FROM's characters
 LIMIT_MAILS=40 #number mails showed in summary
+BASEDIR="/dir/where/are/all/files"
+
 PROCLOG="/path/of/procmail.log"
 #### END CONFIGURATION ####
 
@@ -33,10 +43,41 @@ MIMEDECODER='$BASEDIR/scripts/mimedecode.pl'
 MAILSTAT='mailstat -k -t -s $PROCLOG'
 MAILSTAT_RESET='mailstat -t $PROCLOG'
 
+COUNTDOWN(){
+    local OLD_IFS="${IFS}"
+    IFS=":"
+    local ARR=( $1 )
+    local SECONDS=$((  (ARR[0] * 60 * 60) + (ARR[1] * 60) + ARR[2]  ))
+    local START=$(date +%s)
+    local END=$((START + SECONDS))
+    local CUR=$START
+
+    while [[ $CUR -lt $END ]]
+    do
+        CUR=$(date +%s)
+        LEFT=$((END-CUR))
+
+        printf "\r$2 %02d:%02d:%02d" \
+            $((LEFT/3600)) $(( (LEFT/60)%60)) $((LEFT%60))
+
+        sleep 1
+    done
+    IFS="${OLD_IFS}"
+    echo "        "
+
+}
+
 LIBNOTIFY() {
 	libicon=$1
 	output=$2
 	output2=$3
+
+	if [ $VERBOSE -ge '2' ]
+        then
+            echo -e "$output - $output2"
+            echo
+        fi
+
 	if notify-send -i $libicon "$output" "$output2" -t $TIMEOUT_NOTIFY &> $TMPPATH/notify-output
 	then
 		rm $TMPPATH/notify-output
@@ -70,14 +111,19 @@ NEWMAILCOUNT() {
 RESET() {
     mkdir "$TMPPATH"
     echo > $REGISTER
-    echo "clean $REGISTER"
     echo > $TMPPATH/summary-body
-    echo "clean $TMPPATH/summary-body"
     echo > $TMPPATH/summary-head 
-    echo "clean $TMPPATH/summary-head"
     echo > $TMPPATH/total 
-    echo "clean $TMPPATH/total"
-    rm -f $TMPPATH/*-fetchmail.log	
+
+    if [ $VERBOSE -ge '2' ]
+    then
+        echo "clean $REGISTER"
+        echo "clean $TMPPATH/summary-body"
+        echo "clean $TMPPATH/summary-head"
+        echo "clean $TMPPATH/total"
+	rm -f $TMPPATH/*-fetchmail.log	
+    fi
+
 }
 
 #with no args update summary and count
@@ -100,7 +146,10 @@ NOTIFY() {
 			do
 				if grep -q "$NM" $REGISTER
 				then
-					echo "debug: checked" > /dev/null
+				    if [ $VERBOSE -ge '4' ]
+                                    then
+					echo "debug: $NM checked"
+				    fi
 				else
 				        #####################################   
 					##extract and decode from and subject
@@ -161,6 +210,7 @@ NOTIFY() {
 					    [[ $SUBJECT2 != X-Virus-Scanned:* ]] && \
 					    [[ $SUBJECT2 != X-Envelope-From:* ]] && \
 					    [[ $SUBJECT2 != Auto-Submitted:* ]] && \
+					    [[ $SUBJECT2 != X-Greylist:* ]] && \
 					    [[ $SUBJECT2 != X-Mailer:* ]] && \
 					    [[ $SUBJECT2 != Reply-To:* ]]
 					do
@@ -173,7 +223,9 @@ NOTIFY() {
 					    #check if SUBJECTLINE is last line
 					    if [ $SUBJECTLINE -gt $TOTLINENM ]
 					    then
-						SUBJECT2="X-BeenThere:"
+						#use a string that broke while loop
+						#SUBJECT2="X-BeenThere:"
+						break
 					    fi
 					done
 					
@@ -183,13 +235,15 @@ NOTIFY() {
 					    
 				       	    SUBJECT=`$MIMEDECODER "$SUBJECT"`
 					fi
-		    								
+		    					
+					#remove "Subject"
 					SUBJECT="`echo $SUBJECT | sed 's/^Subject: //'`"
 				 
 										 
 					#remove square bracket of mailing list
 					CLEANSUBJECT="`echo $SUBJECT | sed 's/\[.*\]//'`"
-			      
+					CLEANSUBJECT="`echo $CLEANSUBJECT | sed 's/^ //'`"
+
 					#cut long subject to xmpp
 					if [ `echo $CLEANSUBJECT | wc -c` -gt $LIMIT_SUB ]
 					then 
@@ -254,11 +308,11 @@ NOTIFY() {
 	echo >> $TMPPATH/summary-head
 	echo "$TOT" > $TMPPATH/total
 		
-	if [ $TOT -eq 0 ] 
-	then 
-		#not necessary
-		RESET
-	fi
+	#if [ $TOT -eq 0 ] 
+	#then 
+		##not necessary
+		#RESET
+	#fi
 	#echo $TOT
 }
 
@@ -277,7 +331,12 @@ MYfetchmail(){
 	    then
 		LIBNOTIFY $iconERROR "fetchmail" "`cat $TMPPATH/fetchmail.log | grep -A1 -B1 'DNS' |head -n5`"
 	    else
-		LIBNOTIFY $iconCHECKCOMPLETED "fetchmail" "download done successfull"
+		if [ $VERBOSE -ge 3 ]
+                then
+		    LIBNOTIFY $iconCHECKCOMPLETED "fetchmail" "download done successfull"
+		else
+		    return 0
+		fi
 	    fi
 	fi
 	mv $TMPPATH/fetchmail.log $TMPPATH/`date +%Y%m%d-%H%M`-fetchmail.log
@@ -381,7 +440,13 @@ loop)
 	    do
 		MYfetchmail
 		NOTIFY $1
-		sleep $TIME 
+		if [ $VERBOSE -ge 2 ]
+                then
+                    echo
+                    COUNTDOWN 00:$TIME:00 "new check from"
+                else
+		    sleep $TIME"m"
+		fi
 	    done
 	}
 
