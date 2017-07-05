@@ -1,5 +1,5 @@
 #!/usr/bin/perl
-#Copyleft 2013  varogami <varogami@autistici.org>
+#Copyleft 2017  varogami <varogami@autistici.org>
 
 #This program is free software: you can redistribute it and/or modify
 #it under the terms of the GNU General Public License as published by
@@ -14,8 +14,10 @@
 #You should have received a copy of the GNU General Public License
 #along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use "utf-8";
+#use "utf-8";
 use Encode;
 
 my $var = decode("MIME-Header", $ARGV[0] );
+binmode(STDOUT, ":utf8");
 print $var;
+

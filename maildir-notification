@@ -1,49 +1,11 @@
 #!/bin/bash
 
-#### CONFIGURATION ####
-MAILDIRS=(
-'/path/maildir/one'
-'/path/maildir/two'
-'/path/maildir/three'
-)
-         
+#CONFIG
+CONF=~/.maildir-notification.conf
+MSG_NO_CONF="ERROR: config file \"$CONF\" NOT FOUND!!!!"
 
-
-
-
-
-
-
-
-VERBOSE=2 #0-4
-TIME=10 #timeout for loop check in minutes
-TIMEOUT_NOTIFY=50000 #notify timeout in ms
-LIMIT_SUB=60 #number of SUBJCETS's character in xmpp notification
-LIMIT_SUB_NOT=120 #number of SUBJECTs characters in notification
-LIMIT_FROM=30 #number of FROM's characters
-LIMIT_MAILS=40 #number mails showed in summary
-BASEDIR="/dir/where/are/all/files"
-
-PROCLOG="/path/of/procmail.log"
-#### END CONFIGURATION ####
-
-
-TMPPATH="$BASEDIR/cache"
-icon="$BASEDIR/icons/mail_new.png"
-iconERROR="$BASEDIR/icons//mail-mark-important.png"
-iconCHECK="$BASEDIR/icons/mail-send-receive.png"
-iconCHECKCOMPLETED="$BASEDIR/icons/emblem-default.png"
-iconEND="$BASEDIR/icons/mail-mark-read.png"
-
-REGISTER=$TMPPATH/notified
-XMPPNOTIFY='$BASEDIR/scripts/xmpp-notify.py'
-MIMEDECODER='$BASEDIR/scripts/mimedecode.pl'
-
-## needed for some test
-MAILSTAT='mailstat -k -t -s $PROCLOG'
-MAILSTAT_RESET='mailstat -t $PROCLOG'
-
-COUNTDOWN(){
+#not used but maybe
+countdown(){
     local OLD_IFS="${IFS}"
     IFS=":"
     local ARR=( $1 )
@@ -56,7 +18,7 @@ COUNTDOWN(){
     do
         CUR=$(date +%s)
         LEFT=$((END-CUR))
-
+	
         printf "\r$2 %02d:%02d:%02d" \
             $((LEFT/3600)) $(( (LEFT/60)%60)) $((LEFT%60))
 
@@ -64,476 +26,634 @@ COUNTDOWN(){
     done
     IFS="${OLD_IFS}"
     echo "        "
-
 }
 
-LIBNOTIFY() {
-	libicon=$1
-	output=$2
-	output2=$3
-
-	if [ $VERBOSE -ge '2' ]
-        then
-            echo -e "$output - $output2"
-            echo
-        fi
-
-	if notify-send -i $libicon "$output" "$output2" -t $TIMEOUT_NOTIFY &> $TMPPATH/notify-output
+send_notify(){
+    if $XORG
+    then
+	if $DUNST_IGNORE_NEWLINE
 	then
-		rm $TMPPATH/notify-output
+	    title="[new mail] $2"
+	    body="`echo "$3" | head -n1 | cut -b 1-80`"
 	else
+	    title="$2"
+	    body="$3"
+	fi
+
+	icon="$1"
+
+	if $VERBOSE; then echo "`date` - check_new_mail - notify-send - $title - $body - $icon"; fi
+
+	if notify-send --icon="$icon" "$title" "$body" -t $TIMEOUT_NOTIFY &> $TMPPATH/notify-output
+	then
+	    rm $TMPPATH/notify-output
+	else
+	    if $DUNST_IGNORE_NEWLINE
+	    then
+		notify-send "[check_new_mail script]" "error: `cat $TMPPATH/notify-output | head -n1`"
+	    else
 		notify-send "check_new_mail message error" "`cat $TMPPATH/notify-output`"
-		rm $TMPPATH/notify-output
-	fi	
+	    fi
+	    rm $TMPPATH/notify-output
+	fi
+    fi
+}
+
+send_notify_py(){
+    #icon title body file id
+    SOURCE="$4"
+    ID=`getMsgid $SOURCE`
+    ln -s $SOURCE $TMPPATH/openmail/new
+    $XORG_NOTIFY_PY "$1" "$2" "$3" "$TMPPATH/openmail" "$ID"
+    rm $TMPPATH/openmail/new/*
 }
 
 #count new mail and update summary head
-NEWMAILCOUNT() {
+count_new_mail() {
     #to summary
-    echo > $TMPPATH/summary-head
+    echo > $TMPPATH/data-maildirs
     for i in ${MAILDIRS[@]}
     do
 	NUMB=`find $i/new -type f | wc -l`
 	(( TOT+=NUMB ))
-	
+
 	#to summary
 	if [ ! $NUMB -eq 0 ]
 	then
-	    echo "`basename $i` ($NUMB)" >> $TMPPATH/summary-head
+	    echo "`basename $i`|$NUMB" >> $TMPPATH/data-maildirs
 	fi
-		
+	
     done
     echo "$TOT" 
     #to summary
     echo "$TOT" > $TMPPATH/total
 }
 
-RESET() {
-    mkdir "$TMPPATH"
-    echo > $REGISTER
-    echo > $TMPPATH/summary-body
-    echo > $TMPPATH/summary-head 
-    echo > $TMPPATH/total 
-
-    if [ $VERBOSE -ge '2' ]
+reset() {
+    if [ ! -e "$TMPPATH" ]; then mkdir "$TMPPATH"; fi
+    if [ -e $REGISTER ]
     then
-        echo "clean $REGISTER"
-        echo "clean $TMPPATH/summary-body"
-        echo "clean $TMPPATH/summary-head"
-        echo "clean $TMPPATH/total"
-	rm -f $TMPPATH/*-fetchmail.log	
+	rm $REGISTER
+	touch $REGISTER
+    fi
+    if [ -e $TMPPATH/data-mails ]
+    then
+	rm $TMPPATH/data-mails
+	touch $TMPPATH/data-mails
+    fi
+    if [ -e $TMPPATH/data-maildirs ]
+    then
+	rm $TMPPATH/data-maildirs 
+	touch $TMPPATH/data-maildirs
+    fi
+    if [ -e $TMPPATH/total ]
+    then
+	rm $TMPPATH/total 
+	touch $TMPPATH/total
+    fi
+    if ls $TMPPATH | grep -q "\-fetchmail.log"
+    then
+	rm $TMPPATH/*-fetchmail.log
+    fi
+
+    if $VERBOSE
+    then
+	echo "clean $REGISTER"
+	echo "clean $TMPPATH/data-mails"
+	echo "clean $TMPPATH/data-maildirs"
+	echo "clean $TMPPATH/total"
+	echo "rm $TMPPATH/*-fetchmail.log"
     fi
 
 }
 
-#with no args update summary and count
-#with "lib - std - xmpp" args makes notification
-NOTIFY() {	
-	TOT=0
-	echo > $TMPPATH/summary-head
-	for i in ${MAILDIRS[@]}
-	do
-		NUMB=`find $i/new -type f | wc -l`
-		(( TOT+=NUMB ))
-		if [ ! $NUMB -eq 0 ]
-		then
-			##to summary
-			echo "`basename $i` ($NUMB)" >> $TMPPATH/summary-head
-			##needed to update in real time the total count
-			#TMPNUM=`cat $TMPPATH/total`
-			
-			for NM in $i/new/*
-			do
-				if grep -q "$NM" $REGISTER
-				then
-				    if [ $VERBOSE -ge '4' ]
-                                    then
-					echo "debug: $NM checked"
-				    fi
-				else
-				        #####################################   
-					##extract and decode from and subject
-					echo "$NM" >> $REGISTER		
-					
-					FROM="`cat $NM | grep '^From:' | head -n1 | sed 's/^From: //;s/>//' | cut -d'<' -f2`"
-					#if from is on multiline
-					if ! echo $FROM | grep "@" > /dev/null
-					then
-					    
-					    FROMLINE="`cat $NM | grep -n '^From:' | head -n1 | cut -d: -f 1`"					    
-					    (( FROMLINE = FROMLINE + 1 ))					    
-					    while ! echo $FROM | grep "@" > /dev/null
-					    do
-						FROM="`cat $NM | sed -n "$FROMLINE p"`"
-					    done
-					    FROM="`echo $FROM | head -n1 | sed 's/>//' | cut -d'<' -f2`"
-					fi
-
-					#cut long FROM field - print only domain mail if mail different to hotmail, gmail etc else only username
-					if [ `echo $FROM | wc -c` -gt $LIMIT_FROM ]
-					then
-					    if echo $FROM | grep -iE "hotmail|gmail.com" > /dev/null 
-					    then 
-						FROM="`echo $FROM | cut -d @ -f1`"
-					    else
-						FROM="`echo $FROM | cut -d @ -f2`"
-					    fi
-					fi
-					
-					#some mail have parentesis - maybe an error to the way extract from
-					FROM="`echo $FROM | sed 's/(.*)//'`"		
-
-                                        #number of subject position, needed for find subject in multiline
-					SUBJECTLINE="`cat $NM | grep -n '^Subject:' | head -n1 | cut -d: -f 1`"
-					TOTLINENM=`cat $NM | wc -l`
-					(( SUBJECTLINE = SUBJECTLINE + 1 ))
-
-					## find subject in next line
-					SUBJECT="`cat $NM | grep '^Subject:' | head -n1 `"
-					SUBJECT2="`cat $NM | sed -n "$SUBJECTLINE p"`"
-
-					while [[ $SUBJECT2 != *X-BeenThere:* ]] && \
-					    [[ $SUBJECT2 != From:* ]] && \
-					    [[ $SUBJECT2 != Cc:* ]] && \
-					    [[ $SUBJECT2 != Content-Type:* ]] && \
-					    [[ $SUBJECT2 != Message-ID:* ]] && \
-					    [[ $SUBJECT2 != MIME-Version:* ]] && \
-					    [[ $SUBJECT2 != Mime-Version:* ]] && \
-					    [[ $SUBJECT2 != X-PHP-Originating-Script:* ]] && \
-					    [[ $SUBJECT2 != Date:* ]] && \
-					    [[ $SUBJECT2 != X-SA-Exim-Version:* ]] && \
-					    [[ $SUBJECT2 != References:* ]] && \
-					    [[ $SUBJECT2 != In-Reply-To:* ]] && \
-					    [[ $SUBJECT2 != To:* ]] && \
-					    [[ $SUBJECT2 != Message-Id:* ]] && \
-					    [[ $SUBJECT2 != Organization:* ]] && \
-					    [[ $SUBJECT2 != X-Virus-Scanned:* ]] && \
-					    [[ $SUBJECT2 != X-Envelope-From:* ]] && \
-					    [[ $SUBJECT2 != Auto-Submitted:* ]] && \
-					    [[ $SUBJECT2 != X-Greylist:* ]] && \
-					    [[ $SUBJECT2 != X-Mailer:* ]] && \
-					    [[ $SUBJECT2 != Reply-To:* ]]
-					do
-					    
-					    SUBJECT=$SUBJECT$SUBJECT2
-					    
-					    (( SUBJECTLINE = SUBJECTLINE + 1 ))
-					    SUBJECT2="`cat $NM | sed -n "$SUBJECTLINE p"`"
-					    
-					    #check if SUBJECTLINE is last line
-					    if [ $SUBJECTLINE -gt $TOTLINENM ]
-					    then
-						#use a string that broke while loop
-						#SUBJECT2="X-BeenThere:"
-						break
-					    fi
-					done
-					
-					## find subject's type of decoding and decode it if needed
-					if echo $SUBJECT | grep -iE "\=\?utf-8\?|\=\?iso-8859-1\?|\=\?iso-8859-15\?|\=\?Windows-1252\?" | grep '^Subject:' > /dev/null
-					then
-					    
-				       	    SUBJECT=`$MIMEDECODER "$SUBJECT"`
-					fi
-		    					
-					#remove "Subject"
-					SUBJECT="`echo $SUBJECT | sed 's/^Subject: //'`"
-				 
-										 
-					#remove square bracket of mailing list
-					CLEANSUBJECT="`echo $SUBJECT | sed 's/\[.*\]//'`"
-					CLEANSUBJECT="`echo $CLEANSUBJECT | sed 's/^ //'`"
-
-					#cut long subject to xmpp
-					if [ `echo $CLEANSUBJECT | wc -c` -gt $LIMIT_SUB ]
-					then 
-						SHORTSUBJECT="`echo $CLEANSUBJECT | cut -b1-$LIMIT_SUB`"
-						SHORTSUBJECT=$SHORTSUBJECT'..'
-					else
-						SHORTSUBJECT=$CLEANSUBJECT
-					fi
-					
-					#cut long subject to libnotify
-					if [ `echo $CLEANSUBJECT | wc -c` -gt $LIMIT_SUB_NOT ]
-					then 
-						SHORTSUBJECT2="`echo $CLEANSUBJECT | cut -b1-$LIMIT_SUB`"
-						SHORTSUBJECT2=$SHORTSUBJECT2'..'
-					else
-						SHORTSUBJECT2=$CLEANSUBJECT
-					fi
-
-					##fix problem with pango like xml encoding
-					## by https://trac.openxdata.org/attachment/wiki/EncodingXMLForLiquibase/encode-xml.bash
-					SHORTSUBJECTPANGO=\
-"`echo $SHORTSUBJECT | sed 's/&/&amp;/g;s/>/\&gt;/g;s/</\&lt;/g;s/\"/\&quot;/g;s/\r/\&\#13;/g;:a;N;$!ba;s/\n/\&\#10;/g'`"
-
-					#another way but not work - use recode ..html
-					#SHORTSUBJECTPANGO="`echo $SHORTSUBJECT | recode -f ..html`"
-
-					echo "<span foreground=\"#000000\">`date +"%a %d %b %H:%M"`</span>  [`basename $i`] <b><span foreground=\"#000000\"> $FROM </span></b> $SHORTSUBJECTPANGO" >> $TMPPATH/summary-body		
-										
-					####NOTIFICATIONS
-					case $1 in
-					stdout)
-						echo "$FROM || $CLEANSUBJECT"
-						sleep 0.3s
-					;;
-					
-					xmpp)
-						$XMPPNOTIFY "mail: [`basename $i`] $SHORTSUBJECT
-						"
-						sleep 2s
-					;;
-					
-					libnotify)
-						LIBNOTIFY $icon "`basename $i`" "$FROM \n$SHORTSUBJECT2"
-						sleep 2s			
-					;;
-					
-					all)
-						echo "$FROM || $SUBJECT"
-						$XMPPNOTIFY "mail: [`basename $i`] $SHORTSUBJECT
-						"
-						LIBNOTIFY $icon "`basename $i`" "$FROM \n$SHORTSUBJECT2"	
-						sleep 0.3s
-					;;					
-					esac
-					
-				fi
-			done
-		fi	
-	done
-	
-	##to summary
-	echo >> $TMPPATH/summary-head
-	echo "$TOT" > $TMPPATH/total
-		
-	#if [ $TOT -eq 0 ] 
-	#then 
-		##not necessary
-		#RESET
-	#fi
-	#echo $TOT
+getFrom(){
+    MAIL="$1"
+    OUT="`cat $MAIL | formail -X From: | tr -d '\n' | sed 's/^From: //;s/>//' | cut -d'<' -f2`"
+    if [ -z $OUT ]
+    then
+	OUT="NOMAIL!!!"
+    fi
+    echo "$OUT"
 }
 
-MYfetchmail(){
+getFromMuttAlias(){
+    if [ -e "$2" ]
+    then
+	ALIAS_NAME="`cat "$2" | grep "$1" | awk '{ print $2 }'| head -n1`"
+	if [ -z $ALIAS_NAME ]
+	then
+	    ALIAS_NAME="$1"
+	fi
+	echo $ALIAS_NAME
+    else
+	echo "$1"
+    fi
+}
+
+getSubject(){
+    MAIL="$1"
+    OUT="`cat $MAIL | formail -X Subject: | tr -d '\n'`"
+    echo "$OUT"
+}
+
+getMsgid(){
+    MAIL="$1"
+    OUT="`cat $MAIL | formail -X Message-ID: | sed 's/^Message-ID: //;s/>//' | cut -d'<' -f2`"
+    echo "$OUT"
+}
+
+download_mail_getmail(){
+    if  pidof getmail > /dev/null
+    then
+	send_notify $iconEND "mail" "another getmail are running"
+    else
+	if $VERBOSE; then echo "`date` - check_new_mail - starting getmail"; fi
+	$GETMAIL &> $TMPPATH/download_mail_getmail.log
+	if $VERBOSE; then echo "`date` - check_new_mail - stop getmail"; fi
+
+	if cat $TMPPATH/download_mail_getmail.log | grep -qi "error" 
+	then
+	    send_notify $iconERROR "mail" "`cat $TMPPATH/download_mail_getmail.log | grep -i 'error' | head -n5 `"
+	else
+	    if $VERBOSE
+	    then
+		send_notify $iconCHECKCOMPLETED "getmail" "download done successfull"
+	    else
+		return 0
+	    fi
+	fi
+	
+	mv $TMPPATH/download_mail_getmail.log $TMPPATH/`date +%Y%m%d-%H%M`-download_mail_getmail.log
+    fi
+}
+
+download_mail_fetchmail(){
     if  pidof fetchmail > /dev/null
     then
-	LIBNOTIFY $iconEND "fetchmail" "another fetchmail are running"
+	send_notify $iconEND "mail" "another fetchmail are running"
     else
-	touch $TMPPATH/fetchmail.log
-	fetchmail --logfile $TMPPATH/fetchmail.log
-	if cat $TMPPATH/fetchmail.log | grep "error" > /dev/null
+	touch $TMPPATH/download_mail_fetchmail.log
+	
+	if $VERBOSE; then echo "`date` - check_new_mail - starting fetchmail"; fi
+	$FETCHMAIL --logfile $TMPPATH/download_mail_fetchmail.log
+	if $VERBOSE; then echo "`date` - check_new_mail - stop fetchmail"; fi
+
+	if cat $TMPPATH/download_mail_fetchmail.log | grep -q "error" 
 	then
-	    LIBNOTIFY $iconERROR "fetchmail" "`cat $TMPPATH/fetchmail.log | grep -A1 -B1 'error' | head -n5`"
+	    send_notify $iconERROR "mail" "`cat $TMPPATH/download_mail_fetchmail.log | grep -A1 -B1 'error' | head -n5 `"
 	else
-	    if cat $TMPPATH/fetchmail.log | grep "DNS" > /dev/null
+	    if cat $TMPPATH/download_mail_fetchmail.log | grep -q "DNS"
 	    then
-		LIBNOTIFY $iconERROR "fetchmail" "`cat $TMPPATH/fetchmail.log | grep -A1 -B1 'DNS' |head -n5`"
+		send_notify $iconERROR "mail" "`cat $TMPPATH/download_mail_fetchmail.log | grep -A1 -B1 'DNS' | head -n5`"
 	    else
-		if [ $VERBOSE -ge 3 ]
-                then
-		    LIBNOTIFY $iconCHECKCOMPLETED "fetchmail" "download done successfull"
+		if $VERBOSE
+		then
+		    send_notify $iconCHECKCOMPLETED "fetchmail" "download done successfull"
 		else
 		    return 0
 		fi
 	    fi
 	fi
-	mv $TMPPATH/fetchmail.log $TMPPATH/`date +%Y%m%d-%H%M`-fetchmail.log
+	mv $TMPPATH/download_mail_fetchmail.log $TMPPATH/`date +%Y%m%d-%H%M`-download_mail_fetchmail.log
     fi
 
 }
 
-	
-##### MAIN #############
-#########################
+txt2pango(){
+    ##fix problem with pango like xml encoding
+    ##by https://trac.openxdata.org/attachment/wiki/EncodingXMLForLiquibase/encode-xml.bash
+    echo "$1" | sed 's/&/&amp;/g;s/>/\&gt;/g;s/</\&lt;/g;s/\"/\&quot;/g;s/\r/\&\#13;/g;:a;N;$!ba;s/\n/\&\#10;/g'
+    ##another way but not work - use recode ..html
+    #echo "$1" | recode -f ..html
+}
 
-case $1 in
 
-summary)
-        #build summary head (maildir name with number of new mail)
-	TOTNUM=`NEWMAILCOUNT`
-	if [ `cat $TMPPATH/total` -eq 0 ]
+check_new_mail() {
+    if $VERBOSE; then echo "`date` - check_new_mail - begin main func"; fi
+    TOT=0
+    echo > $TMPPATH/data-maildirs
+    for i in ${MAILDIRS[@]}
+    do
+	NUMB=`find $i/new -type f | wc -l`
+	(( TOT+=NUMB ))
+	if [ $NUMB -ne 0 ]
 	then
-	    LIBNOTIFY $iconEND "summary" "<br>No Mails"
-	    RESET
-	else
-	    ##remove title of mail in summary that moved from new to cur and clean "notified mail" register
-	    VAR=1
-	    cp $TMPPATH/notified $TMPPATH/tmp-notified
-	    while read line
-	    do
-		if [ ! -e $line ]
-		then
-		    cat $TMPPATH/summary-body | sed "$VAR d" > $TMPPATH/tmp
-		    mv $TMPPATH/tmp $TMPPATH/summary-body
-		    cat $TMPPATH/tmp-notified | sed "$VAR d" > $TMPPATH/tmp2
-		    mv $TMPPATH/tmp2 $TMPPATH/tmp-notified
-		else
-		    (( VAR++ ))
-		fi
-	    done < $TMPPATH/notified
-	    mv $TMPPATH/tmp-notified $TMPPATH/notified
-		
-	    #build all if I updated only head or only body summary
-	    if [ `cat $TMPPATH/total` != `cat  $TMPPATH/summary-body | sed '/^$/d' | wc -l` ]
-	    then 
-		NOTIFY
-	    fi
-		
-	    ##cut if have much mails
-	    if [ `cat $TMPPATH/summary-body | wc -l` -gt $LIMIT_MAILS ]
-	    then	
-		tac $TMPPATH/summary-body | head -n $LIMIT_MAILS > $TMPPATH/tmp-summary
-		(( REST = TOTNUM - LIMIT_MAILS))
-		echo "..." >> $TMPPATH/tmp-summary
-		echo "others $REST mails" >> $TMPPATH/tmp-summary
+	    DIRNAME="`basename $i`"
+	    ##put maildir info to data file
+	    echo "$DIRNAME|$NUMB" >> $TMPPATH/data-maildirs
 
-		cat $TMPPATH/summary-head > $TMPPATH/summary
-		echo >> $TMPPATH/summary
-		cat $TMPPATH/tmp-summary >> $TMPPATH/summary
-
-		rm $TMPPATH/tmp-summary
-	    else
-		cat $TMPPATH/summary-head > $TMPPATH/summary
-		echo >> $TMPPATH/summary
-		tac $TMPPATH/summary-body >> $TMPPATH/summary
+	    if [ ! -e $REGISTER ]
+	    then
+		touch $REGISTER
 	    fi
 	    
-	    case $2 in
-		std)
-		    while read line
-		    do
-			echo $line | w3m -dump -T text/html
-			echo
-		    done <  $TMPPATH/summary 
-		    ;;
-		*) LIBNOTIFY $iconEND "summary" "`cat $TMPPATH/summary`" ;;
-	    esac
-fi
-;;
-
-summary-conky)
-	CTOT=0
-	STRING=""
-	for i in ${MAILDIRS[@]}
-	do
-		CNUMB=`find $i/new -type f | wc -l`
-		(( CTOT+=CNUMB ))
-		if [ ! $CNUMB -eq 0 ]
-		then
-		    STRING=$STRING"\${color}`basename $i| cut -b1-50` ($CNUMB) \${color1}| " 
-		fi
-	done
-	echo "\${color1}new mail ($CTOT):"
-	
-	echo "`echo $STRING | sed 's/|$//'` \${color}"
-	
-;;
-
-###check new mail and notify every TIME
-loop)
-	loop-func(){
-	    clear
-	    echo "CTRL+C to stop"
-	    while [ 1 ]
+	    for NM in $i/new/*
 	    do
-		MYfetchmail
-		NOTIFY $1
-		if [ $VERBOSE -ge 2 ]
-                then
-                    echo
-                    COUNTDOWN 00:$TIME:00 "new check from"
-                else
-		    sleep $TIME"m"
+		if ! grep -q "$NM" $REGISTER
+		then
+		    #####################################   
+		    ##extract and decode from and subject
+		    echo "$NM" >> $REGISTER		
+		    MAILDATE="`date +"%a %d %b %H:%M"`"
+
+		    FROM="`getFrom $NM`"
+
+		    #some mail have parentesis - maybe an error to the way extract from
+		    FROM="`echo $FROM | sed 's/(.*)//'`"
+
+		    #get name from mutt aliases
+		    FROM="`getFromMuttAlias "$FROM" $ALIASES_MUTT`"	
+
+		    #get name from custom aliases
+		    FROM="`getFromMuttAlias "$FROM" $ALIASES`"	
+
+		    LONGFROM="$FROM"
+		    
+		    #cut long FROM field
+		    if [ `echo $FROM | wc -c` -gt $LIMIT_FROM ]
+		    then
+			FROM="`echo $FROM | cut -b1-$LIMIT_FROM`"
+		    fi
+					
+
+		    SUBJECT="`getSubject $NM`"
+					
+		    ## find subject's type of decoding and decode it if needed
+		    if echo $SUBJECT | \
+			grep -iE "\=\?utf-8\?|\=\?iso-8859-1\?|\=\?iso-8859-15\?|\=\?Windows-1252\?|\=\?Windows-1251\?" | \
+			grep -q '^Subject:'
+		    then
+			#TODO: try recode
+			SUBJECT=`$MIMEDECODER "$SUBJECT"`
+		    fi
+		    							
+		    #remove "Subject" 
+		    SUBJECT="`echo $SUBJECT | sed 's/^Subject: //'`"
+									 
+		    if $DEL_SUB_SQUARE
+		    then
+			#remove square bracket of mailing list
+			CLEANSUBJECT="`echo $SUBJECT | sed 's/\[.*\]//'`"
+			CLEANSUBJECT="`echo $CLEANSUBJECT | sed 's/^ //'`"
+		    else
+			CLEANSUBJECT="$SUBJECT"
+		    fi		
+		    
+                    #put mail info in file with data to use after with summary
+		    echo "$MAILDATE|$DIRNAME|$LONGFROM|$CLEANSUBJECT" >> $TMPPATH/data-mails
+					
+		    ####NOTIFICATIONS
+		    if $XORG
+		    then
+			if $VERBOSE; then echo "`date` - check_new_mail - do xorg notify"; fi
+			#cut long subject and encode it to notify-send
+			if [ `echo $CLEANSUBJECT | wc -c` -gt $LIMIT_SUB_NOT ]
+			then 
+			    SHORTSUBJECT_XORG="`echo $CLEANSUBJECT | cut -b1-$LIMIT_SUB_NOT`.."
+			else
+			    SHORTSUBJECT_XORG=$CLEANSUBJECT
+			fi
+			SHORTSUBJECT_XORG_PANGO=`txt2pango "$SHORTSUBJECT_XORG"`
+
+			#TODO - notification with short text of mail's body
+			##BODY="`cat "$NM" | formail -I ""| head -n2 | tail -n1 | cut -b1-$LIMIT_SUB_XMPP`"
+			#send_notify "$iconNEW" "[$DIRNAME] $FROM" "$SHORTSUBJECT_XORG_PANGO\n$BODY"
+
+			#TODO - notification with open/mark as read buttons
+			##send_notify_py "$iconNEW" "[$DIRNAME] $FROM" "$SHORTSUBJECT_XORG_PANGO\n..." "$NM"
+			
+			send_notify "$iconNEW" "[$DIRNAME] $FROM" "$SHORTSUBJECT_XORG_PANGO"
+		    fi
+		    
+		    if $SOUND
+		    then
+			$AUDIONOTIFY $AUDIOFILE
+			if $VERBOSE
+			then
+			    echo "`date` - check_new_mail - do sound notify"
+			fi
+		    fi
+		    
+		    if $STDOUT
+		    then
+			echo "$MAILDATE || [$DIRNAME] $FROM || $CLEANSUBJECT"
+		    fi
+		    
+		    if $XMPP
+		    then
+			#cut long subject to xmpp
+			if [ `echo $CLEANSUBJECT | wc -c` -gt $LIMIT_SUB_XMPP ]
+			then 
+			    SHORTSUBJECT_XMPP="`echo $CLEANSUBJECT | cut -b1-$LIMIT_SUB_XMPP`.."
+			else
+			    SHORTSUBJECT_XMPP=$CLEANSUBJECT
+			fi
+			#notify
+			if $XMPP_PRINTDIR; then VALUE1="[$DIRNAME] "; fi
+			if $XMPP_PRINTMAIL; then VALUE2="$FROM "; fi
+			$XMPPNOTIFY "mail: $VALUE1$VALUE2$SHORTSUBJECT_XMPP" $XMPP_SENDER $XMPP_SENDER_PASSWORD $XMPP_SENDER_SERVER $XMPP_RECEIVER
+		    fi
+
+		    if $MAIL
+		    then
+			echo "$MAILDATE || [$DIRNAME] $FROM || $CLEANSUBJECT" > $TMPPATH/tmpmail
+			cat "$NM" | formail -I "" >> $TMPPATH/tmpmail
+			cat $TMPPATH/tmpmail | \
+			    gpg -r $GPG -e --armor  | \
+			    /usr/bin/mutt -n -s "note - $MAILDATE - maildir notification" -e "set from=$MAILADDRESS" $MAILADDRESS
+			rm $TMPPATH/tmpmail
+		    fi
+		    sleep 0.3s
 		fi
 	    done
-	}
+	fi	
+    done
+    ##to summary
+    echo "$TOT" > $TMPPATH/total
 
-	case $2 in
+}
 
-	    xmpp) 
-		loop-func xmpp
-		;;
 
-	    std) 
-		loop-func stdout
-		;;
+help(){	    
+    echo "use:"
+    echo "$0                                 - download mail (if enabled in config file) and notify new mail
+$0 std                             - download mail (if enabled in config file) and print in terminal new mail
+$0 summary                         - summary of new mail with notification
+$0 summary std                     - summary of new mail in terminal 
+$0 reset                           - delete cached data of new mail arrived"
+}
 
-	    '') 
-		loop-func libnotify
-		;;
-
-	    *) echo "\"$2\" not valid"
-
-	esac
-
-	;;
-
-###one notification
-notify)
-	case $2 in
-	    all) NOTIFY all;;
-	    std) NOTIFY stdout;;
-	    xmpp) NOTIFY xmpp;;
-	    '') NOTIFY libnotify;;
-	    *) echo "\"$2\" not valid"
-	esac
-	;;
-
-###set new mail as seem - TODO
-likeSeem)
-	echo "TODO"
-	;;
-
-###reset summary and register
-reset)
-	RESET
-	;;
-
-###update mail and notify
-updateALL)
-	LIBNOTIFY $iconCHECK "mail" "launching fetchmail"
-	MYfetchmail
-	NOTIFY libnotify
-	LIBNOTIFY $iconEND "mail" "control completed"
-	;;
-
-    count)
-	NEWMAILCOUNT
-	;;
-
-    mailstat)
-	$MAILSTAT
-	;;
+download_check_new_mail(){
+    if $USE_FETCHMAIL
+    then
+	if $VERBOSE
+	then
+	    send_notify $iconCHECK "mail" "launching fetchmail"
+	fi
+	download_mail_fetchmail
+    fi
     
-    mailstatReset)
-	$MAILSTAT_RESET
-	;;
+    if $USE_GETMAIL
+    then
+	if $VERBOSE
+	then
+	    send_notify $iconCHECK "mail" "launching getmail"
+	fi
+	download_mail_getmail
+    fi
+    
+    check_new_mail
 
-*)
-	    echo "use with:"
-	    #cat $0 | grep ^[a-zA-Z][a-zA-Z]*\) | sed 's/)//' | sort -d
-	    echo
-	    echo "
-loop std|xmpp|NULL - fetch mail and notify new mail every TIME seconds (NULL with libnotify)
-notify std|xmpp|NULL - notify if it find new mail (NULL with libnotify)
-summary std|NULL - summary of new mail (NULL with libnotify)
-reset - reset memory of new mail arrived
-updateALL - fetch mail and notify new mail one time
-count - return number of new mail
-likeSeem - TODO
+    if $VERBOSE
+    then
+	send_notify $iconEND "mail" "control completed"
+    fi
+}
 
-summary-conky
+print_data(){
+    LONG=false
 
-mailstat - procmail mailstat
-mailstatReset - reset stats
-"
+    if $DUNST_IGNORE_NEWLINE; then SUMMARY_BODY=false; fi
+    if [ $1 == stdout ]; then SUMMARY_HEAD=true; fi
+    
+    #build head of summary if needed
+    if $SUMMARY_HEAD
+    then
+	while read line
+	do
+	    if [ ! -z $line ]
+	    then
+		DIR="`echo "$line"  | cut -d'|' -f1`"
+		COUNT="`echo "$line"  | cut -d'|' -f2`"
+
+		if $DUNST_IGNORE_NEWLINE
+		then
+		    echo -n "$DIR ($COUNT) | " >> $TMPPATH/tmp-summary
+		else
+		    echo "$DIR ($COUNT)" >> $TMPPATH/tmp-summary
+		fi
+	    fi
+	done < $TMPPATH/data-maildirs
+    fi
+    
+    tac $TMPPATH/data-mails > $TMPPATH/tmp-data
+
+    if [ $1 == stdout ]; then SUMMARY_BODY=true; fi
+    
+    if $SUMMARY_BODY
+    then
+	#limit number of mails if not stdout
+	if [ $1 != stdout ]
+	then
+            ##cut if have much mails
+	    if [ `cat $TMPPATH/data-mails | wc -l` -gt $LIMIT_MAILS_SUMMARY ]
+	    then
+		LONG=true
+		tac $TMPPATH/data-mails | head -n $LIMIT_MAILS_SUMMARY > $TMPPATH/tmp-data
+		(( REST = TOTNUM - LIMIT_MAILS_SUMMARY))
+	    fi
+	fi
+	
+	#build main body
+	while read line
+	do
+	    #extract data
+	    DATE="`echo "$line"  | cut -d'|' -f1`"
+	    if $SHORT_DATE
+	    then
+		WEEK="`echo $DATE | awk '{ print $1 }'`"
+		#for spanish
+		#if [[ $WEEK == mi* ]]
+		if [[ $WEEK == mié ]]
+		then
+		    WEEK=x
+		else
+		    WEEK="`echo $WEEK | cut -b 1-1`"
+		fi
+		OTHER_DATE="`echo $DATE | awk '{ print $2 $3 $4}'| sed 's/:/./'`"
+		DATE="$WEEK$OTHER_DATE"
+	    fi
+	    DIR="`echo "$line"  | cut -d'|' -f2`"
+	    MAIL="`echo "$line"  | cut -d'|' -f3`"
+	    SUB="`echo "$line"  | cut -d'|' -f4`"
+	    MAIL="`getFromMuttAlias "$MAIL" $ALIASES_MUTT`"
+	    MAIL="`getFromMuttAlias "$MAIL" $ALIASES`"
+	    
+
+	    ##build fields of summary
+            if [ $1 != stdout ]
+	    then
+		LF=$LIMIT_FROM_SUMMARY; LD=$LIMIT_DIRNAME_SUMMARY; LS=$LIMIT_SUB_SUMMARY
+		if [ `echo $DIR | wc -c` -gt $LD ]; then DIR="`echo $DIR | cut -b1-$LD`.."; fi	
+		if [ `echo $MAIL | wc -c` -gt $LF ]; then MAIL="`echo $MAIL | cut -b1-$LF`.."; fi	
+		if [ `echo $SUB | wc -c` -gt $LS ]; then SUB="`echo $SUB | cut -b1-$LS`..";	fi
+	    
+		SUBPANGO=`txt2pango "$SUB"`
+		#SUBPANGO="`echo $SUB | sed 's/&/&amp;/g;s/>/\&gt;/g;s/</\&lt;/g;s/\"/\&quot;/g;s/\r/\&\#13;/g;:a;N;$!ba;s/\n/\&\#10;/g'`"
+
+		C=0
+		FINALDATA=""
+		if $PRINTDATA
+		then
+		    let C=C+1
+		    FIELD1="$DATE"
+		fi
+		
+		if $PRINTDIR
+		then
+		    let C=C+1
+		    if [ $C == 2 ]
+		    then
+			FIELD2="[$DIR]"
+		    else
+			FIELD1="[$DIR]"
+		    fi
+		fi
+		
+		if $PRINTMAIL
+		then
+		    let C=C+1
+		    case $C in
+			1) FIELD1="$MAIL";;
+			2) FIELD2="$MAIL";;
+			3) FIELD3="$MAIL";;
+		    esac
+		fi
+
+		case $C in
+		    0) FIELD1="$SUBPANGO";; 
+		    1) FIELD2="$SUBPANGO";;
+		    2) FIELD3="$SUBPANGO";;
+		    3) FIELD4="$SUBPANGO";;
+		esac
+		
+		if $USE_XML
+		then
+		    case $C in
+			0) FINALDATA="<span foreground=\"$COLOR1\">$FIELD1</span>";;
+			1) FINALDATA="<span foreground=\"$COLOR1\">$FIELD1</span> <b>$FIELD2</b>";;
+			2) FINALDATA="$FIELD1 <span foreground=\"$COLOR1\">$FIELD2</span> <b>$FIELD3</b>";;
+			3) FINALDATA="<span foreground=\"$COLOR1\">$FIELD1</span> $FIELD2 <b><span foreground=\"$COLOR2\">$FIELD3</span></b> <b>$FIELD4</b>";;
+		    esac
+		else
+		    case $C in
+			0) FINALDATA="$FIELD1";;
+			1) FINALDATA="$FIELD1 - $FIELD2";;
+			2) FINALDATA="$FIELD1 - $FIELD2 - $FIELD3";;
+			3) FINALDATA="$FIELD1 $FIELD2 $FIELD3 - $FIELD4";;
+		    esac
+		fi
+		
+		echo $FINALDATA >> $TMPPATH/tmp-summary
+	    else
+		STDOUTSUMMARY="$DATE [$DIR] <$MAIL> $SUB"
+		echo $STDOUTSUMMARY >> $TMPPATH/tmp-summary
+	    fi
+	done < $TMPPATH/tmp-data
+    fi
+    rm $TMPPATH/tmp-data
+    
+    if [ $1 != stdout ]
+    then
+	if $LONG
+	then
+	    echo "..." >> $TMPPATH/tmp-summary 	
+	    echo "others $REST mails" >> $TMPPATH/tmp-summary
+	fi
+	send_notify $iconEND "summary" "`cat $TMPPATH/tmp-summary`"
+    else
+	cat $TMPPATH/tmp-summary
+    fi
+
+    rm $TMPPATH/tmp-summary 
+}
 
 
-;;
+summary(){
+    #build summary head (maildir name with number of new mail)
+    TOTNUM=`count_new_mail`
+    if [ `cat $TMPPATH/total` -eq 0 ]
+    then
+	send_notify $iconEND "summary" "<br>No Mails"
+	reset
+    else
+        ##update data-mails (maybe maildirs to be changed from last control)
+	VAR=1
+	cp $TMPPATH/notified $TMPPATH/tmp-notified
+	while read line
+	do
+	    if [ ! -e "$line" ]
+	    then
+		cat $TMPPATH/data-mails | sed "$VAR d" > $TMPPATH/tmp
+		mv $TMPPATH/tmp $TMPPATH/data-mails
+		cat $TMPPATH/tmp-notified | sed "$VAR d" > $TMPPATH/tmp2
+		mv $TMPPATH/tmp2 $TMPPATH/tmp-notified
+	    else
+		(( VAR++ ))
+	    fi
+	done < $TMPPATH/notified
+	mv $TMPPATH/tmp-notified $TMPPATH/notified
+      	
+	#build all if I updated only data-maildirs or only data-mails - maybe error if changed but number is equal
+	if [ `cat $TMPPATH/total` != `cat  $TMPPATH/data-mails | sed '/^$/d' | wc -l` ]
+	then
+	    if [ $1 == std ]; then XORG=false; STDOUT=false; fi
+	    check_new_mail
+	fi
+		
+	#print data
+	case $1 in
+	    std) print_data stdout;;
+	    *) print_data zzzz;; #fix if problem
+	esac
+    fi
+}
 
-esac
 
 
+####MAIN####
+if [ -e $CONF ]
+then
+    . $CONF
+    case $1 in
+	summary)
+	    summary $2
+	    ;;
+	reset) #reset cached data - WARNING new check maybe produce too much notification
+	    reset;;
+	std|'')    #download mail and print new in terminal or notify on desktop
+	    if [ ! -e $TMPPATH/lock ]
+	    then 
+		touch $TMPPATH/lock
+		if [ "$1" == "std" ]
+		then
+		    STDOUT=true
+		    XORG=false
+		fi
+		download_check_new_mail
+		rm $TMPPATH/lock
+	    else
+		send_notify $iconERROR "mail" "another process are running"
+	    fi
+	    ;; 
 
+	*|"--help"|help|h|?)
+	    help
+	    ;;
+    esac
+else
+    if [ ! -e ~/.cache/md-notif-no-conf ]
+    then
+	mkdir ~/.cache/md-notif-no-conf
+    fi
+
+    TMPPATH=~/.cache/md-notif-no-conf
+    VERBOSE=true
+    TIMEOUT_NOTIFY=50000
+    DUNST_IGNORE_NEWLINE=false
+    
+    send_notify "mail-mark-important" "mail" "$MSG_NO_CONF"
+    echo "$MSG_NO_CONF"
+    #TODO make generic conf
+fi
