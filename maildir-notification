@@ -42,7 +42,7 @@ send_notify(){
 
 	icon="$1"
 
-	if $VERBOSE; then echo "`date` - check_new_mail - notify-send - $title - $body - $icon"; fi
+	if $VERBOSE; then echo "`date` - maildir-notification - notify-send - $title - $body - $icon"; fi
 
 	if notify-send --icon="$icon" "$title" "$body" -t $TIMEOUT_NOTIFY &> $TMPPATH/notify-output
 	then
@@ -50,9 +50,9 @@ send_notify(){
 	else
 	    if $DUNST_IGNORE_NEWLINE
 	    then
-		notify-send "[check_new_mail script]" "error: `cat $TMPPATH/notify-output | head -n1`"
+		notify-send "[maildir-notification script]" "error: `cat $TMPPATH/notify-output | head -n1`"
 	    else
-		notify-send "check_new_mail message error" "`cat $TMPPATH/notify-output`"
+		notify-send "maildir-notification message error" "`cat $TMPPATH/notify-output`"
 	    fi
 	    rm $TMPPATH/notify-output
 	fi
@@ -168,9 +168,9 @@ download_mail_getmail(){
     then
 	send_notify $iconEND "mail" "another getmail are running"
     else
-	if $VERBOSE; then echo "`date` - check_new_mail - starting getmail"; fi
+	if $VERBOSE; then echo "`date` - maildir-notification - starting getmail"; fi
 	$GETMAIL &> $TMPPATH/download_mail_getmail.log
-	if $VERBOSE; then echo "`date` - check_new_mail - stop getmail"; fi
+	if $VERBOSE; then echo "`date` - maildir-notification - stop getmail"; fi
 
 	if cat $TMPPATH/download_mail_getmail.log | grep -qi "error" 
 	then
@@ -195,9 +195,9 @@ download_mail_fetchmail(){
     else
 	touch $TMPPATH/download_mail_fetchmail.log
 	
-	if $VERBOSE; then echo "`date` - check_new_mail - starting fetchmail"; fi
+	if $VERBOSE; then echo "`date` - maildir-notification - starting fetchmail"; fi
 	$FETCHMAIL --logfile $TMPPATH/download_mail_fetchmail.log
-	if $VERBOSE; then echo "`date` - check_new_mail - stop fetchmail"; fi
+	if $VERBOSE; then echo "`date` - maildir-notification - stop fetchmail"; fi
 
 	if cat $TMPPATH/download_mail_fetchmail.log | grep -q "error" 
 	then
@@ -230,7 +230,7 @@ txt2pango(){
 
 
 check_new_mail() {
-    if $VERBOSE; then echo "`date` - check_new_mail - begin main func"; fi
+    if $VERBOSE; then echo "`date` - maildir-notification - begin main func"; fi
     TOT=0
     echo > $TMPPATH/data-maildirs
     for i in ${MAILDIRS[@]}
@@ -306,7 +306,7 @@ check_new_mail() {
 		    ####NOTIFICATIONS
 		    if $XORG
 		    then
-			if $VERBOSE; then echo "`date` - check_new_mail - do xorg notify"; fi
+			if $VERBOSE; then echo "`date` - maildir-notification - do xorg notify"; fi
 			#cut long subject and encode it to notify-send
 			if [ `echo $CLEANSUBJECT | wc -c` -gt $LIMIT_SUB_NOT ]
 			then 
@@ -331,7 +331,7 @@ check_new_mail() {
 			$AUDIONOTIFY $AUDIOFILE
 			if $VERBOSE
 			then
-			    echo "`date` - check_new_mail - do sound notify"
+			    echo "`date` - maildir-notification - do sound notify"
 			fi
 		    fi
 		    

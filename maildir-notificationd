@@ -1,0 +1,23 @@
+#!/bin/bash
+
+help(){	    
+    echo "use:"
+    echo "$0 TIME - where TIME is interval in minutes to check mail"
+}
+
+case $1 in
+    [1-9]*)
+	BDIR=$(dirname $0)
+	while [ 1 ]
+	do
+	    echo "`date` - maildir-notificationd - BEGIN CHECK"
+	    $BDIR/maildir-notification
+	    echo "`date` - maildir-notificationd - WAIT $1 MINUTES"
+	    sleep "$1"m
+	done
+	;; 
+
+    ''|*|"--help"|help|h|?)
+    help
+    ;;
+esac
