@@ -4,28 +4,53 @@
 CONF=~/.maildir-notification.conf
 MSG_NO_CONF="ERROR: config file \"$CONF\" NOT FOUND!!!!"
 
-#not used but maybe
-countdown(){
-    local OLD_IFS="${IFS}"
-    IFS=":"
-    local ARR=( $1 )
-    local SECONDS=$((  (ARR[0] * 60 * 60) + (ARR[1] * 60) + ARR[2]  ))
-    local START=$(date +%s)
-    local END=$((START + SECONDS))
-    local CUR=$START
+if $VERBOSE
+then
+    MKDIR="mkdir -v"
+    RM="rm -v"   
+fi
 
-    while [[ $CUR -lt $END ]]
-    do
-        CUR=$(date +%s)
-        LEFT=$((END-CUR))
-	
-        printf "\r$2 %02d:%02d:%02d" \
-            $((LEFT/3600)) $(( (LEFT/60)%60)) $((LEFT%60))
 
-        sleep 1
-    done
-    IFS="${OLD_IFS}"
-    echo "        "
+do_action(){
+    case $DIALOG in
+	rofi)
+	    ANS=$(do_action_rofi "$1" "$2")
+	    ;;
+	dunst)
+	    ANS=$(do_action_dunst "$1" "$2")
+	    ;;
+	zenity)
+	    ANS=$(do_action_zenity "$1" "$2")
+	    ;;
+	*)
+	    send_notify $iconERROR "mail" "wrong DIALOG option \"$DIALOG\" in $CONF"
+	    ANS=error
+	    ;;
+    esac
+    echo $ANS
+}
+
+do_action_rofi(){
+    QUESTION="$1"
+    ANSWERS="$2"
+    LINE=3
+    echo -e "$ANSWERS" | rofi \
+			     -font "mono 10" \
+			     -kb-move-word-forward '' \
+			     -kb-row-tab '' \
+			     -dmenu \
+			     -lines $LINE \
+			     -mesg "$QUESTION" \
+			     -auto-select \
+			     -p "answer:"
+}
+
+do_action_dunst(){
+    echo TODO
+}
+
+do_action_zenity(){
+    echo TODO
 }
 
 send_notify(){
@@ -46,7 +71,7 @@ send_notify(){
 
 	if notify-send --icon="$icon" "$title" "$body" -t $TIMEOUT_NOTIFY &> $TMPPATH/notify-output
 	then
-	    rm $TMPPATH/notify-output
+	    $RM $TMPPATH/notify-output
 	else
 	    if $DUNST_IGNORE_NEWLINE
 	    then
@@ -54,7 +79,9 @@ send_notify(){
 	    else
 		notify-send "maildir-notification message error" "`cat $TMPPATH/notify-output`"
 	    fi
-	    rm $TMPPATH/notify-output
+
+	    echo "`date` - maildir-notification - notify-send -  error: `cat $TMPPATH/notify-output| head -n1`"
+	    $RM $TMPPATH/notify-output
 	fi
     fi
 }
@@ -65,8 +92,9 @@ send_notify_py(){
     ID=`getMsgid $SOURCE`
     ln -s $SOURCE $TMPPATH/openmail/new
     $XORG_NOTIFY_PY "$1" "$2" "$3" "$TMPPATH/openmail" "$ID"
-    rm $TMPPATH/openmail/new/*
+    $RM $TMPPATH/openmail/new/*
 }
+
 
 #count new mail and update summary head
 count_new_mail() {
@@ -90,39 +118,26 @@ count_new_mail() {
 }
 
 reset() {
-    if [ ! -e "$TMPPATH" ]; then mkdir "$TMPPATH"; fi
-    if [ -e $REGISTER ]
+    if [ -e "$TMPPATH" ]
     then
-	rm $REGISTER
-	touch $REGISTER
-    fi
-    if [ -e $TMPPATH/data-mails ]
-    then
-	rm $TMPPATH/data-mails
-	touch $TMPPATH/data-mails
-    fi
-    if [ -e $TMPPATH/data-maildirs ]
-    then
-	rm $TMPPATH/data-maildirs 
-	touch $TMPPATH/data-maildirs
-    fi
-    if [ -e $TMPPATH/total ]
-    then
-	rm $TMPPATH/total 
-	touch $TMPPATH/total
-    fi
-    if ls $TMPPATH | grep -q "\-fetchmail.log"
-    then
-	rm $TMPPATH/*-fetchmail.log
+	$RM -rf "$TMPPATH"
     fi
 
+    $MKDIR "$TMPPATH"
+    
+    touch $REGISTER
+    touch $TMPPATH/data-mails
+    touch $TMPPATH/data-maildirs
+    touch $TMPPATH/total
+    
     if $VERBOSE
     then
-	echo "clean $REGISTER"
-	echo "clean $TMPPATH/data-mails"
-	echo "clean $TMPPATH/data-maildirs"
-	echo "clean $TMPPATH/total"
-	echo "rm $TMPPATH/*-fetchmail.log"
+	echo "build empty file of:"
+	echo "   $REGISTER"
+	echo "   $TMPPATH/data-mails"
+	echo "   $TMPPATH/data-maildirs"
+	echo "   $TMPPATH/total"
+
     fi
 
 }
@@ -166,7 +181,7 @@ getMsgid(){
 download_mail_getmail(){
     if  pidof getmail > /dev/null
     then
-	send_notify $iconEND "mail" "another getmail are running"
+	send_notify $iconEND "mail" "`date` - another getmail are running"
     else
 	if $VERBOSE; then echo "`date` - maildir-notification - starting getmail"; fi
 	$GETMAIL &> $TMPPATH/download_mail_getmail.log
@@ -178,12 +193,11 @@ download_mail_getmail(){
 	else
 	    if $VERBOSE
 	    then
-		send_notify $iconCHECKCOMPLETED "getmail" "download done successfull"
+		send_notify $iconCHECKCOMPLETED "`date` - getmail" "download done successfull"
 	    else
 		return 0
 	    fi
 	fi
-	
 	mv $TMPPATH/download_mail_getmail.log $TMPPATH/`date +%Y%m%d-%H%M`-download_mail_getmail.log
     fi
 }
@@ -191,7 +205,7 @@ download_mail_getmail(){
 download_mail_fetchmail(){
     if  pidof fetchmail > /dev/null
     then
-	send_notify $iconEND "mail" "another fetchmail are running"
+	send_notify $iconEND "mail" "`date` - another fetchmail are running"
     else
 	touch $TMPPATH/download_mail_fetchmail.log
 	
@@ -209,7 +223,7 @@ download_mail_fetchmail(){
 	    else
 		if $VERBOSE
 		then
-		    send_notify $iconCHECKCOMPLETED "fetchmail" "download done successfull"
+		    send_notify $iconCHECKCOMPLETED "`date` - fetchmail" "download done successfull"
 		else
 		    return 0
 		fi
@@ -230,7 +244,7 @@ txt2pango(){
 
 
 check_new_mail() {
-    if $VERBOSE; then echo "`date` - maildir-notification - begin main func"; fi
+    if $VERBOSE; then echo "`date` - maildir-notification - begin parsing of mails"; fi
     TOT=0
     echo > $TMPPATH/data-maildirs
     for i in ${MAILDIRS[@]}
@@ -302,7 +316,7 @@ check_new_mail() {
 		    
                     #put mail info in file with data to use after with summary
 		    echo "$MAILDATE|$DIRNAME|$LONGFROM|$CLEANSUBJECT" >> $TMPPATH/data-mails
-					
+
 		    ####NOTIFICATIONS
 		    if $XORG
 		    then
@@ -362,7 +376,7 @@ check_new_mail() {
 			cat $TMPPATH/tmpmail | \
 			    gpg -r $GPG -e --armor  | \
 			    /usr/bin/mutt -n -s "note - $MAILDATE - maildir notification" -e "set from=$MAILADDRESS" $MAILADDRESS
-			rm $TMPPATH/tmpmail
+			$RM $TMPPATH/tmpmail
 		    fi
 		    sleep 0.3s
 		fi
@@ -374,22 +388,41 @@ check_new_mail() {
 
 }
 
+count_new_mail_to_notify() {
+    if $VERBOSE; then echo "`date` - maildir-notification - count new mail to notify"; fi
+    TOT=0
+    NEWMAIL_TO_NOTIFY=0
+    echo > $TMPPATH/data-maildirs
+    for i in ${MAILDIRS[@]}
+    do
+	NUMB=`find $i/new -type f | wc -l`
+	(( TOT+=NUMB ))
+	if [ $NUMB -ne 0 ]
+	then
+	    DIRNAME="`basename $i`"
+	    
+	    for NM in $i/new/*
+	    do
+		if ! grep -q "$NM" $REGISTER
+		then
+		    (( NEWMAIL_TO_NOTIFY+=1 ))
+		fi
+	    done
+	fi	
+    done
 
-help(){	    
-    echo "use:"
-    echo "$0                                 - download mail (if enabled in config file) and notify new mail
-$0 std                             - download mail (if enabled in config file) and print in terminal new mail
-$0 summary                         - summary of new mail with notification
-$0 summary std                     - summary of new mail in terminal 
-$0 reset                           - delete cached data of new mail arrived"
+    ##to summary
+    echo "$TOT" > $TMPPATH/total
+    echo "$NEWMAIL_TO_NOTIFY" > $TMPPATH/new_mail_to_notify
 }
+
 
 download_check_new_mail(){
     if $USE_FETCHMAIL
     then
 	if $VERBOSE
 	then
-	    send_notify $iconCHECK "mail" "launching fetchmail"
+	    send_notify $iconCHECK "mail" "`date` - launching fetchmail"
 	fi
 	download_mail_fetchmail
     fi
@@ -398,17 +431,47 @@ download_check_new_mail(){
     then
 	if $VERBOSE
 	then
-	    send_notify $iconCHECK "mail" "launching getmail"
+	    send_notify $iconCHECK "mail" "`date` - launching getmail"
 	fi
 	download_mail_getmail
+    fi
+
+    count_new_mail_to_notify
+    GO_NOT=false
+
+    if [ $NEWMAIL_TO_NOTIFY -gt $LIMIT_NEWMAIL_NOTIF ]
+    then
+	TOO_MUCH_MAIL_MSG="too much mail to notify ($NEWMAIL_TO_NOTIFY) - do you want proceed?"
+	echo
+	echo "$TOO_MUCH_MAIL_MSG y/n"
+	echo
+	if [ -z $DISPLAY ]
+	then
+	    read ANS
+	else
+	    ANS=$(do_action "$TOO_MUCH_MAIL_MSG" "y\nn")
+	fi
+	case $ANS in
+	    y)GO_NOT=true
+	esac
+    fi
+
+    if ! $GO_NOT
+    then
+	XORG=false
+	STDOUT=false
+	SOUND=false
+	XMPP=false
     fi
     
     check_new_mail
 
     if $VERBOSE
     then
-	send_notify $iconEND "mail" "control completed"
+	send_notify $iconEND "mail" "`date` control completed - $NEWMAIL_TO_NOTIFY / $TOT"
     fi
+
+
 }
 
 print_data(){
@@ -552,7 +615,7 @@ print_data(){
 	    fi
 	done < $TMPPATH/tmp-data
     fi
-    rm $TMPPATH/tmp-data
+    $RM $TMPPATH/tmp-data
     
     if [ $1 != stdout ]
     then
@@ -566,13 +629,13 @@ print_data(){
 	cat $TMPPATH/tmp-summary
     fi
 
-    rm $TMPPATH/tmp-summary 
+    $RM $TMPPATH/tmp-summary 
 }
 
 
 summary(){
     #build summary head (maildir name with number of new mail)
-    TOTNUM=`count_new_mail`
+    TOTNUM=$(count_new_mail)
     if [ `cat $TMPPATH/total` -eq 0 ]
     then
 	send_notify $iconEND "summary" "<br>No Mails"
@@ -610,38 +673,65 @@ summary(){
     fi
 }
 
+test_md_not(){
+    echo
+}
 
+help(){	    
+    echo "use:"
+    echo "$0                                 - download mail (if enabled in config file) and notify new mail
+$0 std                             - download mail (if enabled in config file) and print in terminal new mail
+$0 summary                         - summary of new mail with notification
+$0 summary std                     - summary of new mail in terminal 
+$0 reset                           - delete cached data of new mail arrived
+$0 test                            - test notify and terminal message"
+}
 
 ####MAIN####
 if [ -e $CONF ]
 then
     . $CONF
-    case $1 in
-	summary)
-	    summary $2
-	    ;;
-	reset) #reset cached data - WARNING new check maybe produce too much notification
-	    reset;;
-	std|'')    #download mail and print new in terminal or notify on desktop
-	    if [ ! -e $TMPPATH/lock ]
-	    then 
-		touch $TMPPATH/lock
-		if [ "$1" == "std" ]
-		then
-		    STDOUT=true
-		    XORG=false
-		fi
-		download_check_new_mail
-		rm $TMPPATH/lock
-	    else
-		send_notify $iconERROR "mail" "another process are running"
-	    fi
-	    ;; 
+    if [ ! -e $TMPPATH ]
+    then
+	$MKDIR "$TMPPATH"
+    fi
 
-	*|"--help"|help|h|?)
-	    help
-	    ;;
-    esac
+    #check if $TMPPATH passed was correct
+    if [ -e $TMPPATH ]
+    then
+	case $1 in
+	    summary)
+		summary $2
+		;;
+	    reset) #reset cached data - WARNING new check maybe produce too much notification
+		reset;;
+	    test)
+		test_md_not;;
+	    std|'')    #download mail and print new in terminal or notify on desktop
+		if [ ! -e $TMPPATH/mdn.lock ]
+		then 
+		    touch $TMPPATH/mdn.lock
+		    if [ "$1" == "std" ]
+		    then
+			STDOUT=true
+			XORG=false
+		    fi
+		    download_check_new_mail
+		    $RM $TMPPATH/mdn.lock
+		else
+		    send_notify $iconERROR "mail" "another process are running"
+		fi
+		;; 
+	    
+	    *|"--help"|help|h|?)
+	        help
+		;;
+	esac
+    else
+	MSG_NO_CACHE="no cache directory $TMPPATH"
+	send_notify "mail-mark-important" "mail" "$MSG_NO_CACHE"
+	echo "$MSG_NO_CACHE"
+    fi
 else
     if [ ! -e ~/.cache/md-notif-no-conf ]
     then
