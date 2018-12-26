@@ -31,3 +31,24 @@ reset					                       -- clean files and all recorded notification
 
 count 					                     -- return total number of new mail (to use with some windows manager like awesome)
 
+## buy me a beer
+
+1FhWFmo7cTJcy5QcaspBx4YQesX8ABmDcm
+
+LgukKx6Fs1yF5RVQwvCcUouZvYZs32dQy1
+
+0xe238366668fe16474b17029661faa7793bd8628c
+
+XvrSupavjQSK7sPR2oAL8LyykEfBZicS2Y
+
+TN6CcQQjU2tJW4UEjeGrc32szhxXoEAazj
+
+t1QVmXjM2Xw8Qdp4jYQ1ezdmC78iWQDkgHS
+
+471yFJ9asHc1goBACvbyzwSeQCyWXk8PVSjVCU6od7r1EeMcJwXQUyzeuK66yKuR59CBHQ3bSqfP32faZnBMyr4v3CjTJ6L
+
+
+
+bitcoin cash
+
+1AdvZ3ZamzXSZapCzteyDTppyXhMPMNvjg
